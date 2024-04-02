@@ -1,0 +1,1201 @@
+---
+title: "2nd Project"
+author: "Roberto Álvarez"
+date: "2024-03-20"
+output: 
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    number_sections: yes
+    theme: cerulean
+    highlight: haddock
+    fig_width: 10.5
+    fig_height: 7.5
+    fig_caption: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+set.seed(10)
+```
+
+
+# Introduction
+The datasets are from the red and white variants of Portuguese "Vinho Verde" wine. This particular wine holds significance in the viticulture landscape, showcasing distinctive physicochemical and sensory attributes that contribute to its quality and character. For further insights into Vinho Verde, interested individuals may refer to the official website at http://www.vinhoverde.pt/en/.
+
+Privacy and logistical constraints have led to the availability of only physicochemical (input) and sensory (output) variables in these datasets. Notably, information regarding grape types, wine brand, selling prices, and other proprietary details remains undisclosed. Consequently, the focus lies squarely on understanding the features that define the quality of Vinho Verde wine.
+
+
+The objective of this analysis is:
+
+1. **Quality Assessment**: Develop predictive models to assess the quality of Vinho Verde wines based on their physicochemical and sensory attributes.
+2. **Cost-Sensitive Evaluation**: Go beyond traditional evaluation metrics by considering cost-sensitive approaches that weigh the financial implications of prediction errors.
+
+By exploting classification techniques, we aim to unravel the intricate relationship between wine attributes and quality perception. Furthermore, through cost-sensitive evaluation, we seek to optimize model performance while considering the economic consequences associated with misclassifications.
+
+In the following sections, we delve into exploratory data analysis, model development, and evaluation to derive actionable insights that can inform decision-making processes within the viticulture industry. Ultimately, our attempt is to enhance wine quality assessment practices, boost consumer satisfaction, and stimulate innovation in the production of Vinho Verde wines. 
+
+# Load useful libraries
+```{r Libraries, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(skimr)
+library(mice)
+library(VIM)
+library(GGally)
+library(MASS)
+library(glmnet)
+library(e1071) 
+library(rpart)
+library(pROC)
+library(class)
+library(VGAM)
+library(gridExtra)
+library(ggplot2)
+library(patchwork)
+library(reshape2)
+library(viridis)
+library(knitr)
+library(forcats)
+library(caret)
+library(randomForest)
+library(gbm)
+library(neuralnet)
+
+```
+
+
+# Load and explore the data set
+
+We load both datasets and merge them together: 
+
+```{r load}
+
+# Read the white wine dataset
+data_white <- read.csv("winequality-white.csv", header = TRUE, sep = ";")
+
+# Read the red wine dataset
+data_red <- read.csv("winequality-red.csv", header = TRUE, sep = ";")
+
+# Add a new variable indicating the origin of each observation
+data_white$Type <- "white"
+data_red$Type <- "red"
+
+# Convert the "Type" variable to a factor
+data_white$Type <- factor(data_white$Type)
+data_red$Type <- factor(data_red$Type)
+
+# Combine the two datasets vertically
+data <- rbind(data_white, data_red)
+
+# Check the structure of the combined dataset
+glimpse(data)
+
+```
+
+
+1. **Fixed Acidity (Tartaric Acid):**
+   - Measurement: g/dmÃÂ³
+   - Description: Most acids involved with wine or fixed/nonvolatile (do not evaporate readily).
+
+2. **Volatile Acidity (Acetic Acid):**
+   - Measurement: g/dmÃÂ³
+   - Description: The amount of acetic acid in wine, which at too high levels can lead to an unpleasant, vinegar taste.
+
+3. **Citric Acid:**
+   - Measurement: g/dmÃÂ³
+   - Description: Found in small quantities, citric acid can add 'freshness' and flavor to wines.
+
+4. **Residual Sugar:**
+   - Measurement: g/dmÃÂ³
+   - Description: The amount of sugar remaining after fermentation stops. Wines with greater than 45 grams/liter are considered sweet.
+
+5. **Chlorides (Sodium Chloride):**
+   - Measurement: g/dmÃÂ³
+   - Description: The amount of salt in the wine.
+
+6. **Free Sulfur Dioxide:**
+   - Measurement: mg/dmÃÂ³
+   - Description: The free form of SO exists in equilibrium between molecular SO (as a dissolved gas) and bisulfite ion; it prevents microbial growth and the oxidation of wine.
+
+7. **Total Sulfur Dioxide:**
+   - Measurement: mg/dmÃÂ³
+   - Description: Amount of free and bound forms of SO. In low concentrations, SO is mostly undetectable in wine, but at free SO concentrations over 50 ppm, it becomes evident in the nose and taste of wine.
+
+8. **Density:**
+   - Measurement: g/cmÃÂ³
+   - Description: The density of wine is close to that of water depending on the percent alcohol and sugar content.
+
+9. **pH:**
+   - Measurement: Unitless (scale 0-14)
+   - Description: Describes how acidic or basic a wine is. Most wines are between 3-4 on the pH scale.
+
+10. **Sulphates (Potassium Sulphate):**
+    - Measurement: g/dmÃÂ³
+    - Description: A wine additive which can contribute to sulfur dioxide gas (SO???) levels, acting as an antimicrobial and antioxidant.
+
+11. **Alcohol (% by Volume):**
+    - Measurement: Percentage
+    - Description: The percent alcohol content of the wine.
+
+ Output Variable:
+
+- **Quality (Score between 0 and 10):**
+  - Description: Represents the quality of the wine on a scale from 0 (lowest) to 10 (highest).
+
+
+
+Lets get insights from the available data.
+
+```{r summary}
+summary(data)
+```
+
+
+1. **Fixed Acidity:** The mean value is 7.215 g/dmÂ³, indicating the average total acidity in the wine. The range extends from 3.8 g/dmÂ³ to 15.9 g/dmÂ³.
+
+2. **Volatile Acidity:** The mean value is 0.3397 g/dmÂ³, representing the average amount of acetic acid in the wine. Lower values preferred to avoid a vinegary taste.
+
+3. **Citric Acid:** The mean citric acid content is 0.3186 g/dmÂ³, with values ranging from 0 to 1.66 g/dmÂ³.
+
+4. **Residual Sugar:** The mean residual sugar level is 5.443 g/dmÂ³, indicating the amount of sugar remaining after fermentation. This measure helps classify wines as sweet or dry.
+
+5. **Chlorides:** The mean chloride content is 0.05603 g/dmÂ³, with values ranging from 0.009 g/dmÂ³ to 0.611 g/dmÂ³. 
+
+6. **Free Sulfur Dioxide:** The mean free sulfur dioxide concentration is 30.53 mg/dmÂ³, with values ranging from 1 mg/dmÂ³ to 289 mg/dmÂ³. 
+
+7. **Total Sulfur Dioxide:** The mean total sulfur dioxide concentration is 115.7 mg/dmÂ³, with values ranging from 6 mg/dmÂ³ to 440 mg/dmÂ³. 
+
+8. **Density:** The mean density is 0.9947 g/cmÂ³, with values ranging from 0.9871 g/cmÂ³ to 1.039 g/cmÂ³. 
+
+9. **pH:** The mean pH value is 3.219, indicating the wine's acidity or alkalinity. It falls within the range that most wines have, that is of 3 to 4 on the pH scale.
+
+10. **Sulphates:** The mean sulphate content is 0.5313 g/dmÂ³, with values ranging from 0.22 g/dmÂ³ to 2 g/dmÂ³. 
+
+11. **Alcohol:** The mean alcohol content is 10.49% by volume, with values ranging from 8% to 14.9%. Alcohol content is a crucial factor influencing the wine's taste and body.
+
+12. **Quality:** The wine quality ranges from 3 to 9, with a mean value of 5.818. This variable represents the overall perceived quality of the wine.
+
+13. **Type:** Indicates the type of wine, with 4898 white wine samples and 1599 red wine samples in the dataset.
+
+
+
+## Split Data 
+
+Split data into training and testing sets 
+
+```{r Split}
+
+# Splitting the data into training and testing sets
+in_train <- createDataPartition(data$quality, p = 0.6, list = FALSE) 
+training <- data[in_train,]
+testing <- data[-in_train,]
+
+# Checking the number of rows in the training and testing sets
+print(paste("Number of rows in training ", nrow(training)))
+print(paste("Number of rows in testing ", nrow(testing)))
+
+
+```
+
+
+# Data cleaning and Feature Engineering
+
+We check for duplicate values in both train and test: 
+
+```{r duplicatevalues}
+# Checking for duplicates in the training set
+duplicated_rows_training <- duplicated(training)
+any(duplicated_rows_training)
+
+
+# Checking for duplicates in the testing set
+duplicated_rows_testing <- duplicated(testing)
+any(duplicated_rows_testing)
+
+
+```
+
+There are duplicate values in the dataset.We have to remove them:
+
+```{r removeduplicate, }
+# Remove duplicated rows from the training set
+training <- unique(training)
+
+# Remove duplicated rows from the testing set
+testing <- unique(testing)
+
+```
+
+ 
+## Missing values
+
+For the data cleaning lets start first checking if there are any missing values in the training or testing sets:
+
+```{r NA}
+
+# Check for missing values in the training set
+missing_values_train <- colSums(is.na(training))
+# Print the number of missing values for each variable in the training set
+print(missing_values_train)
+
+
+# Check for missing values in the training set
+missing_values_test<- colSums(is.na(testing))
+# Print the number of missing values for each variable in the training set
+print(missing_values_test)
+```
+
+There are no missing values neither in the training nor the testing datasets. 
+
+# EDA
+
+Following the data cleaning process, we proceed with the Exploratory Data Analysis (EDA) to gain insights into the distribution and characteristics of our variables.
+
+```{r distribution_bytype,,echo=FALSE}
+ggplot(training,aes(x=factor(quality),fill= Type)) +
+       geom_bar(stat="count") +
+  labs(title = "Distribution of Wine Quality by Type") +
+  scale_fill_manual(values=c("steelblue", "red3")) +
+       theme_minimal()
+```
+
+The distribution of wine quality by type shows a concentration around levels 5, 6, and 7, with white wine exhibiting a higher count for those levels compared to red wine.
+
+## Balance classes
+
+We first check the proportion of the levels in quality in order to know where to divide the quality  into 2 categories.
+
+```{r table1}
+# Checking the distribution of 'Quality' in the training set
+table(training$quality) / length(training$quality)
+```
+
+We then proceed to divide the quality scores into 2 categories to do classification, from lower than 6 will be classified as "Regular" and  6 or higher as "Premium".
+```{r twocategories}
+# Transformation: 
+# Categorize quality as "Regular" or "Premium"
+training$quality <- ifelse(training$quality < 6, "Regular", "Premium")
+# Convert 'quality' to a factor variable
+training$quality <- factor(training$quality, levels = c("Regular", "Premium"))
+# Similarly for testing data
+testing$quality <- ifelse(testing$quality < 6, "Regular", "Premium")
+testing$quality <- factor(testing$quality, levels = c("Regular", "Premium"))
+
+```
+
+```{r table2}
+# Checking the distribution of 'quality' in the training set
+table(training$quality) / length(training$quality)
+```
+
+This is the Naive classifier, 62.74 % Premium, which indicates  high quality wine and 37.25% Regular, clearly states that is an unbalanced dataset. 
+
+## Distributions
+
+To gain an overall visualization of our data we perfom a ggpairs visualization:
+```{r ggpairs, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Specify the fill color based on the 'quality' variable
+color_fill <- ifelse(training$quality == "Premium", "pink", "blue")
+
+# Create scatter plot matrix
+ggpairs(training, aes(fill = color_fill),
+        lower = list(continuous = "points"),
+        title = "Scatter Plot Matrix") +
+  theme_light(base_size = 8)
+```
+
+To get a higher a clear interpretation we create the density plots: 
+
+```{r distributions, echo=FALSE}
+# Define colors
+outline_color <- "darkblue"
+fill_color <- "skyblue"
+
+# Plot the distributions
+plot1 <- ggplot(training, aes(x = fixed.acidity)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Fixed Acidity") +
+           theme_minimal()
+
+plot2 <- ggplot(training, aes(x = volatile.acidity)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Volatile Acidity") +
+           theme_minimal()
+
+plot3 <- ggplot(training, aes(x = citric.acid)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Citric Acid") +
+           theme_minimal()
+
+plot4 <- ggplot(training, aes(x = residual.sugar)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Residual Sugar") +
+           theme_minimal()
+
+plot5 <- ggplot(training, aes(x = chlorides)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Chlorides") +
+           theme_minimal()
+
+plot6 <- ggplot(training, aes(x = free.sulfur.dioxide)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Free Sulfur Dioxide") +
+           theme_minimal()
+
+plot7 <- ggplot(training, aes(x = total.sulfur.dioxide)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Total Sulfur Dioxide") +
+           theme_minimal()
+
+plot8 <- ggplot(training, aes(x = density)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Density") +
+           theme_minimal()
+
+plot9 <- ggplot(training, aes(x = pH)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("pH") +
+           theme_minimal()
+
+plot10 <- ggplot(training, aes(x = sulphates)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Sulphates") +
+           theme_minimal()
+
+plot11 <- ggplot(training, aes(x = alcohol)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Alcohol") +
+           theme_minimal()
+
+
+# Arrange the plots in a 3x4 grid
+grid.arrange(plot1, plot2, plot3, plot4, plot5, plot6, plot7, plot8, plot9, plot10, plot11, nrow = 3, ncol = 4)
+
+```
+
+- **Fixed Acidity:** The density plot for fixed acidity in the training set shows a roughly normal distribution, with the majority of wines having fixed acidity levels clustered around the mean value. 
+
+- **Volatile Acidity:** For volatile acidity reveals a right-skewed distribution, with most wines having lower levels of volatile acidity. However, there are some wines with higher volatile acidity levels, as indicated by possible outliers in the distribution.
+
+- **Citric Acid:** The density plot for citric acid  exhibits a somewhat normal distribution, with the density peaking around 0.3 . 
+
+- **Residual Sugar:** The density plot for residual sugar in the training set shows a right-skewed distribution, indicating that the majority of wines have lower residual sugar levels. However, there are some wines with higher residual sugar content, as indicated by the right tail in the distribution.
+
+- **Chlorides:** The density plot for chlorides suggests a roughly centered distribution, with most wines having chloride levels clustered around a 0.05. 
+
+- **Free Sulfur Dioxide:** For free sulfur dioxide the distribution plot shows a somewhat normal distribution, with the density peaking at 30.5. 
+
+- **Total Sulfur Dioxide:** The density plot for total sulfur dioxide reveals a left-skewed distribution, suggesting that most wines have lower total sulfur dioxide levels. However, there are some wines with higher total sulfur dioxide content, as indicated by the  strange form of the distribution.
+
+- **Density:** The density plot for density presents a roughly normal distribution structure, with the density peaking around 0.99 and 1 values. 
+
+- **pH:** The distribution for pH shows a somewhat normal distribution.
+
+- **Sulphates:** The density plot for sulphates suggests a roughly normal distribution. However, there are some outliers present in the data, hence the distribution is not centered.
+
+- **Alcohol:** The density plot for alcohol reveals a right-skewed distribution, indicating that most wines have lower alcohol content. However, there are some wines with higher alcohol content, as indicated by the right tail in the distribution. It might be beneficial to apply a transformation to this feature to reduce the skewness and better understand its distribution.
+
+```{r barplot, echo=FALSE}
+# Create the barplot
+barplot <- ggplot(training, aes(x = Type, fill = factor(quality))) +
+           geom_bar(position = "dodge") +
+           labs(x = "Type", y = "Count", fill = "Quality") +
+           ggtitle("Barplot of Quality by Type") +
+           theme_minimal()
+
+# Display the barplot
+print(barplot)
+```
+
+The barplot of quality by Type shows that for red wine, quality classes are mostly balance, however, for white wine, the Premium class stands out.
+ 
+ 
+ 
+After having analyzed the distributions, we proceeded to examine the relationships between different pairs of numerical variables that in the ggpairs seemed to present outliers: 
+ 
+```{r scatterplot,  echo=FALSE }
+# Create scatterplots for all combinations of selected variables
+plot1 <- ggplot(training, aes(x = volatile.acidity, y = citric.acid)) + geom_point()
+plot2 <- ggplot(training, aes(x = volatile.acidity, y = residual.sugar)) + geom_point()
+plot3 <- ggplot(training, aes(x = volatile.acidity, y = chlorides)) + geom_point()
+plot4 <- ggplot(training, aes(x = volatile.acidity, y = free.sulfur.dioxide)) + geom_point()
+plot5 <- ggplot(training, aes(x = volatile.acidity, y = density)) + geom_point()
+plot6 <- ggplot(training, aes(x = volatile.acidity, y = sulphates)) + geom_point()
+
+plot7 <- ggplot(training, aes(x = citric.acid, y = residual.sugar)) + geom_point()
+plot8 <- ggplot(training, aes(x = citric.acid, y = chlorides)) + geom_point()
+plot9 <- ggplot(training, aes(x = citric.acid, y = free.sulfur.dioxide)) + geom_point()
+plot10 <- ggplot(training, aes(x = citric.acid, y = density)) + geom_point()
+plot11 <- ggplot(training, aes(x = citric.acid, y = sulphates)) + geom_point()
+
+plot12 <- ggplot(training, aes(x = residual.sugar, y = chlorides)) + geom_point()
+plot13 <- ggplot(training, aes(x = residual.sugar, y = free.sulfur.dioxide)) + geom_point()
+plot14 <- ggplot(training, aes(x = residual.sugar, y = density)) + geom_point()
+plot15 <- ggplot(training, aes(x = residual.sugar, y = sulphates)) + geom_point()
+
+plot16 <- ggplot(training, aes(x = chlorides, y = free.sulfur.dioxide)) + geom_point()
+plot17 <- ggplot(training, aes(x = chlorides, y = density)) + geom_point()
+plot18 <- ggplot(training, aes(x = chlorides, y = sulphates)) + geom_point()
+
+plot19 <- ggplot(training, aes(x = free.sulfur.dioxide, y = density)) + geom_point()
+plot20 <- ggplot(training, aes(x = free.sulfur.dioxide, y = sulphates)) + geom_point()
+
+plot21 <- ggplot(training, aes(x = density, y = sulphates)) + geom_point()
+
+# Arrange plots in a grid
+combined_plots <- plot1 + plot2 + plot3 + plot4 + plot5 + plot6 +
+                  plot7 + plot8 + plot9 + plot10 + plot11 + 
+                  plot12 + plot13 + plot14 + plot15 + 
+                  plot16 + plot17 + plot18 + 
+                  plot19 + plot20 +
+                  plot21
+
+# Display the grid
+combined_plots
+
+```
+
+From the density plots, outliers are evident for several variables. Notably, for "volatile acidity," values exceeding 1.4 g/dmÂ³ appear to be outliers. Similarly, for "citric acid," values above 1 g/dmÂ³ and for "residual sugar," values surpassing 30 g/dmÂ³ also appear to be outliers. These extreme values are likely to be noise and may potentially distort our analysis. Therefore, we will remove these outliers to ensure the reliability of our future analyses.
+
+## Correlation
+
+```{r corr,  echo=FALSE}
+
+#We extract a dataset only with quantitative data (11 variables)
+numeric_training <- training %>% select_if(is.numeric)
+# Calculate the correlation matrix
+corr_matrix <- cor(numeric_training)
+# Melt the correlation matrix
+corr_matrix_melted <- reshape2::melt(corr_matrix)
+
+# Plot the heatmap
+ggplot(corr_matrix_melted, aes(Var2, Var1, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis() +
+  theme_minimal() +
+  labs(title = "Correlation between numeric variables",
+       x = "Variables",
+       y = "Variables",
+       fill = "Correlation") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5)) +
+  geom_text(aes(label = round(value, 2)), color = "black") +
+  coord_fixed()
+
+```
+
+After analyzing the distributions and identifying outliers, the next step involves examining the correlation matrix of the numerical variables. This correlation heatmap provides insights into the relationships between the features in the training dataset. By detecting multicollinearity among variables, we can assess how strongly predictors are correlated with each other. In our analysis, we observe that there are no high correlations between most variables, indicating low multicollinearity. However, there is a notable correlation between the variables "free sulfur dioxide" and "total sulfur dioxide," with a correlation coefficient of 0.71. This suggests a stronger relationship between these two variables compared to others, which is expected given their similar nature.
+
+
+In this analysis, we examine the correlation between wine quality and other variables in the dataset. The variable "quality_numeric" represents the quality of wine, with a value of 1 indicating good quality and 0 indicating otherwise.
+
+```{r variablescorr,  echo=FALSE}
+training$quality_numeric <- as.numeric(training$quality == "Premium")
+correlation <- cor(training[, -c(12, 13)])
+corr_quality <- sort(correlation["quality_numeric",], decreasing = T)
+corr <- data.frame(corr_quality)
+ggplot(corr,aes(x = row.names(corr), y = corr_quality)) + 
+  geom_bar(stat = "identity", fill = "lightblue") + 
+  scale_x_discrete(limits= row.names(corr)) +
+  labs(x = "", y = "Quality", title = "Correlations") + 
+  theme(plot.title = element_text(hjust = 0, size = rel(1.5)),
+        axis.text.x = element_text(angle = 45, hjust = 1)) 
+```
+Upon evaluating the correlation coefficients between wine quality and the other variables, we find that the most significant correlation exists with the variable "alcohol." This suggests that alcohol content has a strong relationship with wine quality, indicating that wines with higher alcohol content tend to be associated with better quality.
+
+```{r dropcolumn, include=FALSE}
+# Drop the last columns of training_2
+training <- training[, -ncol(training)]
+```
+
+### Most important variable
+We make plots to visualize the relationship between the most important variable, alcohol, and quality in the training set.
+```{r, echo=FALSE}
+# Scatter plot
+plot1 <- ggplot(training, aes(x = alcohol, y = quality)) +
+  geom_point() +
+  labs(x = "Alcohol", y = "Quality", title = "Scatter Plot of Alcohol vs. Quality")
+
+# Box plot
+plot2 <- ggplot(training, aes(x = factor(quality), y = alcohol)) +
+  geom_boxplot() +
+  labs(x = "Quality", y = "Alcohol", title = "Box Plot of Alcohol by Quality")
+
+
+
+grid.arrange(plot1, plot2, nrow = 1, ncol = 2)
+
+```
+
+It appears that there's an unusual data point where the alcohol value is higher than 14 for the Regular quality level.
+
+## Removing outliers
+
+We remove the outliers mentioned earlier: 
+```{r outliers}
+# Define conditions to filter out outliers for training data
+condition_train <- training$volatile.acidity <= 1.4 &
+                   training$citric.acid <= 1 &
+                   training$residual.sugar <= 30 &
+                   training$chlorides <= 0.5 &
+                   training$free.sulfur.dioxide <= 125 &
+                   training$density <= 1.01 &
+                   training$sulphates <= 1.75 &
+                   !(training$quality == "Regular" & training$alcohol > 14)  
+
+# Filter the training data using the condition
+training_2 <- training[condition_train, ]
+
+# Define conditions to filter out outliers for testing data
+condition_test <- testing$volatile.acidity <= 1.4 &
+                  testing$citric.acid <= 1 &
+                  testing$residual.sugar <= 30 &
+                  testing$chlorides <= 0.5 &
+                  testing$free.sulfur.dioxide <= 125 &
+                  testing$density <= 1.01 &
+                  testing$sulphates <= 1.75 &
+                  !(testing$quality == "Regular" & testing$alcohol > 14)  
+
+# Filter the testing data using the condition
+testing_2 <- testing[condition_test, ]
+
+
+```
+
+## Transformations
+
+After exploring various transformation methods to address positive skewness in the 'residual sugar' and 'alcohol' variables, we attempted both natural logarithm and base 2 logarithm transformations on these variables. However, we observed that these transformations did not significantly improve the skewness or achieve a more symmetrical distribution. Hence, we chose not to apply transformations to these variables due to their distribution characteristics.
+
+We also attempted a squared transformation on the 'total sulfur dioxide' variable, but this did not provide significant improvements in the variable's distribution.
+
+Additionally, we centered the 'chlorides,' 'free sulfur dioxide,' 'density,' and 'sulphates' variables, but we did not observe substantial improvements in their distributions after centering.
+
+Finally, we standardized the 'chlorides,' 'free sulfur dioxide,' 'density,' and 'sulphates' variables. However, these transformations did not yield significant improvements in the variables' distributions.
+```{r transformations,}
+# Apply log transformation to residual.sugar and alcohol and replace original columns
+#training_2$residual.sugar <- log(training_2$residual.sugar)
+#training_2$alcohol <- log(training_2$alcohol)
+#training_2[, c( "residual.sugar")] <- log2(training_2[, c( "residual.sugar")] + 1)
+#training_2[, c( "alcohol")] <- log2(training_2[, c( "alcohol")] + 1)
+
+# Apply x^2 transformation to total.sulfur.dioxide
+#training_2$total.sulfur.dioxide <- training_2$total.sulfur.dioxide^2
+
+# Apply other transformations if needed
+# For example, centering chlorides, free.sulfur.dioxide, density, and sulphates
+# Center variables
+#training_2$chlorides <- training_2$chlorides - mean(training_2$chlorides)
+#training_2$free.sulfur.dioxide <- training_2$free.sulfur.dioxide - mean(training_2$free.sulfur.dioxide)
+#training_2$density <- training_2$density - mean(training_2$density)
+#training_2$sulphates <- training_2$sulphates - mean(training_2$sulphates)
+
+# Standardize variables
+#training_2$chlorides <- scale(training_2$chlorides)
+#training_2$free.sulfur.dioxide <- scale(training_2$free.sulfur.dioxide)
+#training_2$density <- scale(training_2$density)
+#training_2$sulphates <- scale(training_2$sulphates)
+
+```
+
+
+Final plot of distributions by class after EDA preprocessing is presented below. Each density plot represents a different variable, colored by the class variable "quality" to visualize the distribution for both Regular and Premium cases :
+
+```{r distributions_byclass, echo=FALSE}
+# Define colors
+outline_color <- "darkblue"
+fill_color <- "skyblue"
+
+# Plot the distributions
+plot1 <- ggplot(training_2, aes(x = fixed.acidity, fill = factor(quality))) + 
+           geom_density(color = outline_color) +
+           ggtitle("Fixed Acidity") +
+           theme_minimal()
+
+plot2 <- ggplot(training_2, aes(x = volatile.acidity, fill = factor(quality))) + 
+           geom_density(color = outline_color) +
+           ggtitle("Volatile Acidity") +
+           theme_minimal()
+
+plot3 <- ggplot(training_2, aes(x = citric.acid, fill = factor(quality))) + 
+           geom_density(color = outline_color) +
+           ggtitle("Citric Acid") +
+           theme_minimal()
+
+plot4 <- ggplot(training_2, aes(x = residual.sugar, fill = factor(quality))) + 
+           geom_density(color = outline_color) +
+           ggtitle("Residual Sugar") +
+           theme_minimal()
+
+plot5 <- ggplot(training_2, aes(x = chlorides, fill = factor(quality))) + 
+           geom_density(color = outline_color) +
+           ggtitle("Chlorides") +
+           theme_minimal()
+
+plot6 <- ggplot(training_2, aes(x = free.sulfur.dioxide, fill = factor(quality))) + 
+           geom_density(color = outline_color) +
+           ggtitle("Free Sulfur Dioxide") +
+           theme_minimal()
+
+plot7 <- ggplot(training_2, aes(x = total.sulfur.dioxide, fill = factor(quality))) + 
+           geom_density(color = outline_color) +
+           ggtitle("Total Sulfur Dioxide") +
+           theme_minimal()
+
+plot8 <- ggplot(training_2, aes(x = density, fill = factor(quality))) + 
+           geom_density(color = outline_color) +
+           ggtitle("Density") +
+           theme_minimal()
+
+plot9 <- ggplot(training_2, aes(x = pH, fill = factor(quality))) + 
+           geom_density(color = outline_color) +
+           ggtitle("pH") +
+           theme_minimal()
+
+plot10 <- ggplot(training_2, aes(x = sulphates, fill = factor(quality))) + 
+           geom_density(color = outline_color) +
+           ggtitle("Sulphates") +
+           theme_minimal()
+
+plot11 <- ggplot(training_2, aes(x = alcohol, fill = factor(quality))) + 
+           geom_density(color = outline_color) +
+           ggtitle("Alcohol") +
+           theme_minimal()
+
+# Arrange the plots in a 3x4 grid
+grid.arrange(plot1, plot2, plot3, plot4, plot5, plot6, plot7, plot8, plot9, plot10, plot11, nrow = 3, ncol = 4)
+
+```
+
+This visualization allows us to observe how the distributions of these variables are after the preprocessing and also how they differ between Regular and Premium wines, we can see that for most of the variables distribution among classes is pretty similar, only differing in "density", "alcohol" and "sulphates" variables, where in both cases there is a higher density for Regular wines.
+
+# ML MODELS
+
+In contrast to statistical tools, machine learning algorithms do not rely on assumptions about the underlying data distribution. This characteristic makes machine learning models more adaptable to real-world scenarios, thereby enabling them to make better predictions. However, this improved predictive capability often comes at the expense of providing less interpretable explanations.
+
+In our analysis, we will explore various types of machine learning models, including KNN (K-Nearest Neighbors), SVM (Support Vector Machines), Random Forest, Gradient Boosting, and Neural Networks. The primary criterion for selecting the best model will be based on accuracy.
+
+We are employing the Caret package for all our models, utilizing its functionalities for evaluating performance and estimating model performance from a training set. Each model will be trained using 1 repeat of 5-fold cross-validation to ensure robustness and generalizability.
+
+We create the Caret control that will be used in all the models:
+
+```{r ctrl}
+ctrl <- trainControl(method = "cv", number = 5,
+                     classProbs = TRUE, 
+                     verboseIter=FALSE)
+```
+
+## KNN with Caret
+
+
+```{r knnFit}
+
+knnFit <- train(quality ~ ., 
+                method = "knn", 
+                data = training_2,
+                preProcess = c("center", "scale"),
+                tuneLength = 7, # tuning the KNN model.
+                metric = "Accuracy",
+                trControl = ctrl
+                )
+print(knnFit)
+```
+
+
+### KNN Predictions
+
+```{r knnpred}
+knnPred = predict(knnFit, testing_2)
+
+confusionMatrix(knnPred,testing_2$quality)
+
+```
+
+The confusion matrix generated for the KNN model illustrates the classification results. It shows that out of the 2393 total instances, 482 were correctly classified as 'Regular', 1278 as 'Premium', while 224 instances were incorrectly classified as 'Regular' and 389 as 'Premium'. The overall accuracy of the model was calculated to be approximately 74.17%.
+
+## SVM with Caret
+
+Support Vector Machines model: 
+
+```{r svmFit}
+svmFit <- train(quality ~ ., method = "svmRadial", 
+                data = training_2,
+                preProcess = c("center", "scale"),
+                tuneGrid = expand.grid(C = c(.25, .5, 1),
+                                      sigma = c(0.01,.05)), #for the project a higher grid, a higher grid implies a better profit
+                metric = "Accuracy",
+                trControl = ctrl
+                )
+print(svmFit)
+```
+
+
+### SVM Predictions
+
+```{r svmPred}
+svmPred = predict(svmFit, testing_2)
+confusionMatrix(svmPred,testing_2$quality)
+```
+
+The results demonstrates that out of the total instances, 504 were correctly classified as 'Regular' , and 1306 as 'Premium'. However, 196 instances were incorrectly classified as 'Regular', and 367 as 'Premium'.
+
+The overall accuracy of the SVM model is approximately 76.27%.
+
+
+## Advanced Decision Trees 
+
+### C5.0
+
+Advanced DT model, somehow it's a boosting approach: 
+
+```{r fit.c50}
+# Define the grid of parameters for tuning
+grid_c50 <- expand.grid(.winnow = c(TRUE, FALSE),  # Decision whether to use winnowing or not
+                         .trials = c(1, 4),         # Number of trials for C5.0 algorithm (limited to avoid warning)
+                         .model = "tree")          # Model to be used
+
+# Train the model using cross-validation
+fit.c50 <- train(quality ~ .,
+                 data = training_2,
+                 method = "C5.0",
+                 metric = "Accuracy",
+                 tuneGrid = grid_c50,
+                 trControl = ctrl)
+
+# Print the results of the trained model
+print(fit.c50)
+
+```
+
+
+
+#### DT Predictions
+
+```{r c50.pred}
+c50.pred <- predict(fit.c50, newdata=testing_2)
+confusionMatrix(c50.pred, testing_2$quality)
+              
+```
+
+The output of the results of the Decision Trees model trained using the C5.0 algorithm show that out of the total instances, 571 were correctly classified as 'Regular', and 1265 as 'Premium'. However, 239 instances were incorrectly classified as 'Regular', and 308 as 'Premium'.
+
+The overall accuracy of the Decision Trees (C5.0) model is approximately 77.05%.
+
+
+## Random Forest with Caret
+
+Now train a RF using Caret with the specific metric:
+
+```{r}
+rf.train <- train(quality ~., 
+                  method = "rf", 
+                  data = training_2,
+                  preProcess = c("center", "scale"),
+                  ntree = 200,
+                  cutoff=c(0.7,0.3),
+                  tuneGrid = expand.grid(mtry=c(6,8,10)), 
+                  metric = "Accuracy",
+                  maximize = F,
+                  trControl = ctrl)
+```
+
+
+### RF Prediction:
+
+```{r rfPred2}
+rfPred <-predict(rf.train, newdata=testing_2)
+confusionMatrix(factor(rfPred), testing_2$quality)
+
+```
+The confusion matrix indicates that out of the total instances, 381 were correctly classified as 'Regular' , and 1442 as 'Premium' . However, 60 instances were incorrectly classified as 'Regular', and 490 as 'Premium'. 
+The overall accuracy of the Random Forest model is approximately 76.82%.
+
+## Gradient Boosting
+
+Let's try now XGBoost: 
+
+```{r xgboost}
+xgb_grid = expand.grid(
+  nrounds = c(500,1000),
+  eta = c(0.01, 0.001), # c(0.01,0.05,0.1)
+  max_depth = c(2, 4, 6),
+  gamma = 1,
+  colsample_bytree = c(0.2, 0.4),
+  min_child_weight = c(1,5),
+  subsample = 1
+)
+
+xgb.train = train(quality ~ .,  data=training_2,
+                  trControl = ctrl,
+                  metric="Accuracy",
+                  maximize = F,
+                  tuneGrid = xgb_grid,
+                  preProcess = c("center", "scale"),
+                  method = "xgbTree"
+                  
+)
+```
+
+
+### XGB Prediction:
+
+```{r rfPred}
+xgbPred = predict(xgb.train, newdata=testing_2)
+confusionMatrix(factor(xgbPred), testing_2$quality)
+
+```
+
+The output results show that out of the total instances, 133 were correctly classified as 'Regular' , and 1456 as 'Premium'. However, 48 instances were incorrectly classified as 'Regular', and 746 as 'Premium'.
+
+The overall accuracy of the XGBoost model is approximately 66.68%.
+
+## Neural Networks
+
+We will now proceed with training the Neural Network (NN) model with one hidden layer. 
+
+```{r}
+
+# NN with 1 hidden layer
+nn.train <- train(quality ~., 
+                  method = "nnet", 
+                  data = training_2,
+                  preProcess = c("center", "scale"),
+                  MaxNWts = 1000,
+                  maxit = 100,
+                  tuneGrid = expand.grid(size=c(2,4,6), decay=c(0.01,0.001)), 
+                  metric = "Accuracy",
+                  maximize = F,
+                  trControl = ctrl)
+
+```
+
+
+### NN Predictions
+
+```{r}
+nnPred = predict(nn.train, newdata=testing_2)
+confusionMatrix(factor(nnPred), testing_2$quality)
+```
+
+Out of the total instances, 597 were correctly classified as 'Regular' , and 1233 as 'Premium' . However, 271 instances were incorrectly classified as 'Regular', and 282 as 'Premium'.
+
+The overall accuracy of the Neural Network model is approximately 76.79%.
+
+## Deep Neural Networks
+
+We will now continue with training the Deep Neural Network (DNN) model:
+
+```{r message=FALSE, warning=FALSE}
+dnn.train <- train(quality ~., 
+                  method = "dnn", 
+                  data = training_2,
+                  preProcess = c("center", "scale"),
+                  numepochs = 20, # number of iterations on the whole training set
+                  tuneGrid = expand.grid(layer1 = 1:4,
+                                         layer2 = 0:2,
+                                         layer3 = 0:2,
+                                         hidden_dropout = 0, 
+                                         visible_dropout = 0),
+                  metric = "Accuracy",
+                  maximize = F,
+                  trControl = ctrl
+                )
+
+
+```
+
+###DNN Predictions
+```{r}
+dnnPred = predict(dnn.train, newdata=testing_2)
+confusionMatrix(factor(dnnPred), testing_2$quality)
+```
+
+The results reveal that out of the total instances, 599 were correctly classified as 'Regular' , and 1195 as 'Premium' . However, 309 instances were incorrectly classified as 'Regular', and 280 as 'Premium'.
+
+The overall accuracy of the Deep Neural Network model is approximately 75.28%.
+
+
+## ROC 
+
+The ROC curve and AUC (Area Under the Curve) analysis were conducted to evaluate the performance of the models on the testing_2 dataset. AUC values were calculated for each model, providing insights into their ability to discriminate between 'Regular' and 'Premium' instances.
+
+```{r AUC, message=FALSE}
+# KNN
+knnProb <- predict(knnFit, testing_2, type = "prob") # type="score"
+roc.knn <- roc(testing_2$quality ~ knnProb[, 2])
+
+# SVM
+svmProb <- predict(svmFit, testing_2, type = "prob") # type="score"
+roc.svm <- roc(testing_2$quality ~ svmProb[, 2])
+
+
+# C5.0
+c50Prob <- predict(fit.c50, testing_2, type = "prob") # type="score"
+roc.c50 <- roc(testing_2$quality ~ c50Prob[, 2])
+
+
+# Random Forest
+rfProb <- predict(rf.train, testing_2, type = "prob") # type="score"
+roc.rf <- roc(testing_2$quality ~ rfProb[, 2])
+
+
+# XGBoost
+xgbProb <- predict(xgb.train, testing_2, type = "prob") # type="score"
+roc.xgb <- roc(testing_2$quality ~ xgbProb[, 2])
+
+
+# Neural Network (NN)
+nnProb <- predict(nn.train, testing_2, type = "prob") # type="score"
+roc.nn <- roc(testing_2$quality ~ nnProb[, 2])
+
+
+# Deep Neural Network (DNN)
+dnnProb <- predict(dnn.train, testing_2, type = "prob") # type="score"
+roc.dnn <- roc(testing_2$quality ~ dnnProb[, 2])
+
+```
+
+
+```{r Auctable,  echo=FALSE}
+# Load required packages
+library(knitr)
+
+# Create a data frame with the results
+results <- data.frame(
+  Model = c("KNN", "SVM", "C5.0", "Random Forest", "XGBoost", "Neural Network (NN)", "Deep Neural Network (DNN)"),
+  AUC = c(roc.knn$auc, roc.svm$auc, roc.c50$auc, roc.rf$auc, roc.xgb$auc, roc.nn$auc, roc.dnn$auc)
+)
+
+# Print the results in a table format
+kable(results, align = "c", caption = "AUC values for different models on testing dataset")
+
+```
+
+The AUC values obtained for each model serve as crucial indicators of their discriminatory prowess in distinguishing between positive and negative instances. Higher AUC values, closer to 1, signify superior discriminatory ability, suggesting more accurate predictions. Among the evaluated models, Random Forest stands out with the highest AUC value of 0.8840744, showcasing its exceptional performance. Additionally, SVM and KNN models demonstrate commendable discriminatory power, with AUC values of 0.8281470 and 0.8151716, respectively. Although XGBoost, Neural Network (NN), and Deep Neural Network (DNN) models exhibit slightly lower AUC values, above 0.75, they still showcase reasonable discriminatory performance. These findings underscore the effectiveness of machine learning algorithms in accurately classifying instances, offering valuable insights for practical applications in classification tasks.
+```{r Rocplot}
+# Load required packages
+library(pROC)
+
+# Create an empty plot with the first ROC curve
+plot(roc.knn, col = "red", print.thres = TRUE)
+
+# Add the other ROC curves to the same plot
+plot(roc.svm, col = "blue", print.thres = TRUE, add = TRUE)
+plot(roc.c50, col = "purple", print.thres = TRUE, add = TRUE)
+plot(roc.rf, col = "green", print.thres = TRUE, add = TRUE)
+plot(roc.xgb, col = "yellow", print.thres = TRUE, add = TRUE)
+plot(roc.nn, col = "orange", print.thres = TRUE, add = TRUE)
+plot(roc.dnn, col = "orange", print.thres = TRUE, add = TRUE)
+
+# Add legend
+legend("bottomright", legend = c("KNN", "SVM", "C5.0", "Random Forest", "XGBoost", "Neural Network (NN)", "Deep Neural Network (DNN)"), 
+       col = c("red", "blue", "purple", "green", "yellow", "orange", "orange"), lty = 1, cex = 0.6)
+
+```
+
+
+The best model that we will keep to go further into the analysis is the Random Forest, hence we shall take a look at the variable importance for this model: 
+```{r varimpRF, echo=FALSE}
+rf_imp <- varImp(rf.train, scale = F)
+plot(rf_imp, scales = list(y = list(cex = .95)))
+```
+
+The most important features in this model are "alcohol", "volatily.acid" and "free.sulfur.dioxide".
+
+## Ensemble 
+
+Ensemble learning involves combining multiple classifiers to create a more robust meta-classifier. While highly effective, this approach can be computationally intensive, particularly when considering cost-sensitive learning.
+
+To create an ensemble for classification, we utilize the mode function:
+
+```{r}
+mode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+```
+
+### Ensemble Prediction
+
+To generate ensemble predictions, we apply the mode function across the predictions from individual classifiers, including KNN, SVM, and Random Forest:
+
+```{r}
+ensemble.pred = apply(data.frame(knnPred, svmPred, rfPred), 1, mode) 
+confusionMatrix(factor(ensemble.pred), testing_2$quality)
+
+```
+
+Out of the total instances, 461 were accurately classified as 'Regular', indicating regular quality, while 1348 instances were correctly identified as 'Premium', representing premium quality. However, the model misclassified 154 instances as 'Regular' and 410 instances as 'Premium'.
+
+Despite the ensemble approach combining multiple classifiers, the overall accuracy of the ensemble prediction, approximately 76.23%, does not surpass the individual models' accuracies. This could be attributed to several factors, including potential conflicts in predictions among the individual classifiers and the weighting scheme used in the ensemble method. Additionally, if the individual classifiers exhibit similar performance characteristics, the ensemble's ability to improve overall accuracy may be limited. 
+
+
+## Economic Function 
+
+In this analysis, we aimed to predict wine quality using machine learning models. We explored various models and evaluate their performance based on accuracy and ROC metrics. 
+
+Instead of focusing solely on traditional evaluation metrics, we will consider the cost implications associated with prediction errors.
+We will analyze it from a winery perspective, while it is generally perceived that producing high-quality ("Premium") wine may involve higher costs due to factors like grape selection, fermentation techniques, aging processes, and quality control measures, the exact cost comparison between high-quality and non-high-quality ("Regular") wine production can be complex and context-specific, in this project we will assume that the cost of producing wine is bigger for higher quality than lower quality. Predicting a high quality wine as a non high quality wine has an opportunity cost, this opportunity cost implies missing out the chance to sell a high quality one which sells as a higher price. Nevertheless, our major concern predicting wrong high quality wines, since higher quality implies higher earnings.
+
+We construct a cost-sensitive matrix to quantify the costs associated with different prediction outcomes. Here's the completed matrix:
+
+| Prediction/Reference      | not high quality (Regular) | High-Quality (Premium) |
+| --------------------------| ---------------------------| -----------------------|
+| Not high quality (Regular)| 0                          | 0.5                    |
+| High-Quality (Premium)    | 2                          | 1                      |
+
+Here are the costs associated with each prediction outcome:
+
+- Cost of false positives (predicting high-quality when it's actually low-quality): $2
+- Cost of false negatives (predicting low-quality when it's actually high-quality): $0.5  opportunity cost of predicting wrong 
+- Cost of true positives: $1
+- Cost of true negatives: $0
+
+Threshold Analysis:
+
+We'll explore different thresholds using cross-validation to identify the threshold that minimizes the overall cost. Adjusting the threshold can help balance between false positives and false negatives based on cost implications.
+
+Cost Calculation and Comparison:
+
+After determining the optimal threshold for the model, we'll calculate the cost of the final model and make prediction. The model with the lowest cost will be selected as the preferred option for predicting wine quality.
+
+Overall, this approach aims to identify the cost-effectiveness of the model for predicting wine quality, considering the potential financial implications for wineries and consumer satisfaction.
+
+
+```{r cost.unit, echo=FALSE}
+cost.unit <- c(0, 2, 0.5, 1)
+```
+
+Define first the specific function for the cost:
+
+```{r}
+Costfunction <- function(data, lev = NULL, model = NULL) 
+{
+  y.pred = data$pred 
+  y.true = data$obs
+  CM = confusionMatrix(y.pred, y.true)$table
+  out = sum(cost.unit*CM)/sum(CM)
+  names(out) <- c("Costfunction")
+  out
+}
+```
+
+Now include this function in the Caret control:
+
+```{r}
+ctrl <- trainControl(method = "cv", number = 5,
+                     classProbs = TRUE, 
+                     summaryFunction = Costfunction,
+                     verboseIter=F)
+```
+
+```{r echo=FALSE}
+RfFit <- train(quality ~., 
+                  method = "rf", 
+                  data = training_2,
+                  preProcess = c("center", "scale"),
+                  ntree = 200,
+                  cutoff=c(0.7,0.3),
+                  tuneGrid = expand.grid(mtry=c(6,8,10)), 
+                  metric = "Costfunction",
+                  maximize = F,
+                  trControl = ctrl)
+```
+
+
+```{r}
+# Define thresholds to test
+thresholds <- seq(0.5, 0.9, 0.1)
+
+# Initialize variables to store results
+costs <- numeric(length(thresholds))
+
+# Iterate over thresholds
+for (i in seq_along(thresholds)) {
+  # Make predictions using the current threshold
+  RfProb <- predict(RfFit, testing_2, type = "prob")
+  Rf.pred <- rep("Regular", nrow(testing_2))
+  Rf.pred[which(RfProb[, 2] > thresholds[i])] <- "Premium"
+  
+  # Calculate confusion matrix
+  CM <- confusionMatrix(factor(Rf.pred), testing_2$quality)$table
+  
+  # Calculate cost
+  costs[i] <- sum(cost.unit * CM) / sum(CM)
+}
+
+# Find the index of the minimum cost
+min_cost_index <- which.min(costs)
+
+# Print the threshold and corresponding minimum cost
+cat("Best Threshold:", thresholds[min_cost_index], "\n")
+cat("Minimum Cost:", costs[min_cost_index], "\n")
+
+# Plot threshold vs. cost
+plot(thresholds, costs, type = "o", pch = 16, col = "royalblue2",
+     xlab = "Threshold value", ylab = "Unit cost",
+     main = "Threshold selection")
+
+# Add point for minimum cost
+points(thresholds[min_cost_index], costs[min_cost_index], col = "red", pch = 16)
+
+```
+
+
+
+### Final prediction
+
+After evaluating various thresholds and their corresponding costs, a final threshold of 0.9 was chosen for predicting wine quality using the Random Forest model. This threshold was selected based on its ability to minimize the overall cost associated with misclassifications.
+
+
+Make final predictions for optimal treshold: 
+
+```{r finalpred, warning=FALSE}
+threshold = 0.9
+RfFinal <- train(quality ~., 
+                  method = "rf", 
+                  data = training_2,
+                  preProcess = c("center", "scale"),
+                  ntree = 100,
+                  cutoff=c(0.7,0.3),
+                  tuneGrid = expand.grid(mtry=c(6,8,10)), 
+                  metric = "Costfunction",
+                  maximize = F,
+                  trControl = ctrl
+                 )
+RfProbfinal = predict(RfFinal, testing_2, type="prob")
+FinalRfPred = rep("Regular", nrow(testing_2))
+FinalRfPred[which(RfProbfinal[,2] > threshold)] = "Premium"
+CM = confusionMatrix(factor(FinalRfPred), testing_2$quality)$table
+cost = sum(as.vector(CM)*cost.unit)/sum(CM)
+cost
+```
+ 
+
+From the wine company's perspective, the final cost predicted with the best threshold,  0.4, holds significant implications for operational efficiency and financial performance. Let's consider the interpretation along with the total cost incurred in a month:
+
+1. **Interpretation from the Wine Company's Perspective:**
+   - The final cost represents the expected average cost incurred by the wine company per prediction when utilizing the machine learning model to assess wine quality.
+   - Lowering this cost is crucial for the company as it directly impacts profitability and operational efficiency. A lower cost implies more accurate predictions, reducing the potential financial losses associated with misclassifications.
+   - Achieving a balance between minimizing prediction errors and maximizing revenue from accurate predictions is essential for optimizing business outcomes. The company aims to minimize the cost while maximizing the accuracy of wine quality assessments.
+
+2. **Total Cost Incurred in a Month:**
+   - To understand the total financial impact, let's consider the application of the machine learning model over a month.
+   - Suppose the wine company produces and assesses a significant volume of wine bottles daily. Each prediction made by the model incurs a cost, which accumulates over time.
+   - By multiplying the final cost per prediction (0.4) by the total number of predictions made in a month, the company can estimate the total cost incurred in employing the machine learning model for wine quality assessment during that period.
+   - This total cost encompasses various expenses, including the operational costs associated with model implementation, data processing, and maintenance, as well as the potential financial repercussions of misclassifications on sales revenue and brand reputation.
+
+In summary, the final cost predicted with the best threshold provides the wine company with valuable insights into the economic implications of employing the machine learning model for wine quality assessment. By analyzing this cost alongside the total cost incurred in a month, the company can make informed decisions regarding resource allocation, model optimization, and business strategies to enhance operational efficiency and financial performance.
+
+
+# Conlclusion
+
+Throughout this project, we explored various machine learning models to predict the quality of items, categorizing them as either "Regular" or "Premium". We started by preprocessing the data, handling missing values, and encoding categorical variables. Then, we trained several models including k-nearest neighbors (KNN), support vector machine (SVM), decision trees (C5.0), random forest, XGBoost, neural networks (NN), and deep neural networks (DNN). We evaluated each model's performance using accuracy metrics and confusion matrices, and further analyzed their discriminative power through ROC curves and AUC values on the testing dataset.
+
+From the results, we observed that the random forest model achieved the highest accuracy and AUC score among all models, indicating its superior discriminatory ability in distinguishing between Regular and Premium instances. However, it's noteworthy that ensemble learning techniques combining multiple models did not outperform individual models in this scenario. 
+
+While it's challenging to quantify the exact monetary value of improving quality predictions, the implications of accurate predictions are significant. Effective prediction tools can help in allocating resources efficiently, reducing costs associated with misclassifications, and ultimately improving overall product quality and customer satisfaction.
+
+

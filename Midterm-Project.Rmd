@@ -1,0 +1,823 @@
+---
+title: "Statistical Learning First Project"
+author: "Roberto Álvarez"
+date: "2024-02-28"
+output: 
+  html_document: 
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    number_sections: yes
+    theme: cerulean
+    highlight: haddock
+    fig_width: 10.5
+    fig_height: 7.5
+    fig_caption: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+set.seed(9)
+```
+
+# Introduction
+
+Cardiovascular illnesses (CVDs) are a leading cause of death globally, posing a significant challenge to public health systems and individuals alike. Identifying factors that contribute to heart attacks is crucial for prevention, early intervention, and effective management of cardiovascular health.
+
+When it comes to heart attacks, two types of risks are involved:
+
+- **Identifying High-Risk Individuals**: Individuals who are at a high risk of experiencing a heart attack require timely intervention to prevent adverse outcomes such as heart failure, disability, or even death. Failing to identify these high-risk individuals may lead to missed opportunities for preventive measures and increased healthcare costs.
+
+- **Minimizing False Alarms**: On the other hand, incorrectly classifying individuals as high risk when they are not can lead to unnecessary medical interventions, anxiety for the individual, and strain on healthcare resources. Therefore, it's essential to minimize false alarms while still accurately identifying those at risk.
+
+
+An individual's demographic and clinical characteristics play a significant role in determining their risk of experiencing a heart attack. Factors such as age, gender, blood pressure, cholesterol levels, and lifestyle habits can all influence cardiovascular health and the likelihood of a heart attack occurrence.
+
+**Goal:** Predict whether an individual is at risk of experiencing a heart attack in the future based on their clinical characteristics.
+
+In this study, we've used classification modeling techniques, focusing on probabilities, to develop a predictive model for heart attack risk assessment. By employing statistical classification our objective is to create a reliable model for accurately identifying individuals at risk of heart attacks. This model could aid in early detection, targeted interventions, and personalized care, empowering healthcare professionals to manage cardiovascular health effectively. Our aim is to provide actionable insights into cardiovascular health, reduce the prevalence of cardiovascular diseases, and improve overall quality of life.
+
+# Load useful libraries
+```{r Libraries, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(skimr)
+library(mice)
+library(VIM)
+library(GGally)
+library(MASS)
+library(glmnet)
+library(e1071) 
+library(rpart)
+library(pROC)
+library(class)
+library(randomForest)
+library(caret)
+library(VGAM)
+library(gridExtra)
+library(ggplot2)
+library(patchwork)
+library(reshape2)
+library(viridis)
+library(knitr)
+
+```
+
+
+# Load data
+
+We load the data and take a look at the available dataset.
+
+```{r Load, }
+dataHeart <- read.csv("Heart-Attack.csv", header = TRUE, sep = ";")
+
+# Rename the variable 'class' to 'HeartAttack'
+names(dataHeart)[9] <- "HeartAttack"
+
+# Rename the variable correctly
+names(dataHeart)[3] <- "impulse"
+
+glimpse(dataHeart)
+```
+
+
+1. **Age**: Age of the patient.
+2. **Gender**: Gender of the patient (0 for Female, 1 for Male).
+3. **Impulse**: Heart rate of the patient.
+4. **PressureHigh**: Systolic blood pressure.
+5. **PressureLow**: Diastolic blood pressure.
+6. **Glucose**: Glucose level.
+7. **KCM (Creatine Kinase-MB)**: An enzyme found in heart muscle cells.
+8. **Troponin**: Troponin level.
+9. **HeartAttack**: Whether the patient has heart disease or not (target variable). It's divided into two categories: "negative" refers to the absence of a heart attack, while "positive" refers to the presence of a heart attack.
+
+
+
+Lets get insights from the available data.
+
+```{r summary}
+summary(dataHeart)
+```
+
+- **Age**: The average age is approximately 56 years, with a minimum of 14 years and a maximum of 103 years.
+- **Gender**: This is a binary variable, with 1 possibly representing males and 0 females. The mean is 0.66, indicating a higher proportion of males in the dataset.
+- **Impulse**: The average value is about 78. The maximum value is also significantly higher than the 75th percentile, indicating potential outliers.
+- **Pressure High and Pressure Low**: These represent blood pressure measurements. The values seem realistic, with averages of 127 and 72, respectively.
+- **Glucose**: The average glucose level is about 147, with a minimum of 35 and a maximum of 541.
+- **KCM**: The mean is approximately 15, but the maximum value is significantly higher than the 75th percentile, suggesting potential outliers and indicating a wide spread of values.
+- **Troponin**: The mean is approximately 0.36. The maximum value is significantly higher than the 75th percentile, again suggesting potential outliers.
+- **HeartAttack**: This is the target variable. The most frequent class is "positive", indicating that the majority of patients in the dataset have heart disease.
+
+## Split Data 
+
+Split data into training and testing sets 
+
+```{r Split}
+
+# Splitting the data into training and testing sets
+in_train <- createDataPartition(dataHeart$HeartAttack, p = 0.6, list = FALSE) 
+training <- dataHeart[in_train,]
+testing <- dataHeart[-in_train,]
+
+# Checking the number of rows in the training and testing sets
+print(paste("Number of rows in training ", nrow(training)))
+print(paste("Number of rows in testing ", nrow(testing)))
+
+
+```
+```{r table1}
+# Checking the distribution of 'HeartAttack' in the training set
+table(training$HeartAttack) / length(training$HeartAttack)
+```
+
+This is the Naive classifier, 61.36 % positives, which indicates heart attack and 38.63% negative, clearly states that is an unbalanced dataset. 
+
+We check for duplicate values in both train and test: 
+
+```{r duplicatevalues, echo=FALSE}
+# Checking for duplicates in the training set
+duplicated_rows_training <- duplicated(training)
+any(duplicated_rows_training)
+
+
+# Checking for duplicates in the testing set
+duplicated_rows_testing <- duplicated(testing)
+any(duplicated_rows_testing)
+
+```
+There are not duplicate values in the dataset.
+
+# Data cleaning and Feature Engineering
+
+## Missing values
+
+For the data cleaning lets start first checking if there are any missing values in the training or testing sets:
+
+```{r NA}
+
+# Check for missing values in the training set
+missing_values_train <- colSums(is.na(training))
+# Print the number of missing values for each variable in the training set
+print(missing_values_train)
+
+
+# Check for missing values in the training set
+missing_values_test<- colSums(is.na(testing))
+# Print the number of missing values for each variable in the training set
+print(missing_values_test)
+```
+
+As evident from the data, there are missing values present in both training and testing sets. To address this issue and ensure the completeness of the dataset, we will utilize KNN imputation from the VIF() library: 
+
+```{r KNNimputation}
+
+# Impute missing values using kNN
+imputed_training <- kNN(training[, colnames(training)], k = 5)
+imputed_testing <- kNN(testing[, colnames(testing)], k = 5)
+
+# Get the names of variables in the original datasets
+original_vars <- colnames(training)
+
+# Get the names of variables that were imputed (duplicated)
+imputed_vars <- grep("_imp$", colnames(imputed_training))
+
+# Remove duplicated variables from imputed datasets
+imputed_training <- imputed_training[, -imputed_vars, drop = FALSE]
+imputed_testing <- imputed_testing[, -imputed_vars, drop = FALSE]
+
+
+```
+ 
+We check if it has been imputed correctly: 
+
+```{r check}
+# Check for missing values in the training set
+missing_values_train <- colSums(is.na(imputed_training))
+# Print the number of missing values for each variable in the training set
+print(missing_values_train)
+
+
+# Check for missing values in the training set
+missing_values_test<- colSums(is.na(imputed_testing))
+# Print the number of missing values for each variable in the training set
+print(missing_values_test)
+```
+
+ 
+```{r doublecheck, include=FALSE}
+# Before imputation
+original_training_rows <- nrow(training)
+original_training_cols <- ncol(training)
+original_testing_rows <- nrow(testing)
+original_testing_cols <- ncol(testing)
+
+# After imputation
+imputed_training_rows <- nrow(imputed_training)
+imputed_training_cols <- ncol(imputed_training)
+imputed_testing_rows <- nrow(imputed_testing)
+imputed_testing_cols <- ncol(imputed_testing)
+
+# Compare the number of rows and columns
+cat("Original training dataset size:", original_training_rows, "rows,", original_training_cols, "columns\n")
+cat("Imputed training dataset size:", imputed_training_rows, "rows,", imputed_training_cols, "columns\n")
+
+cat("Original testing dataset size:", original_testing_rows, "rows,", original_testing_cols, "columns\n")
+cat("Imputed testing dataset size:", imputed_testing_rows, "rows,", imputed_testing_cols, "columns\n")
+
+```
+
+
+# EDA
+
+Following the data cleaning process, we proceed with the Exploratory Data Analysis (EDA) to gain insights into the distribution and characteristics of our variables.
+
+## Distributions
+```{r distributions, echo=FALSE}
+# Define colors
+outline_color <- "darkblue"
+fill_color <- "skyblue"
+
+# Plot the distributions
+plot1 <- ggplot(imputed_training, aes(x = age)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Age") +
+           theme_minimal()
+
+plot2 <- ggplot(imputed_training, aes(x = gender)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Gender") +
+           theme_minimal()
+
+plot3 <- ggplot(imputed_training, aes(x = impulse)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Impulse") +
+           theme_minimal()
+
+plot4 <- ggplot(imputed_training, aes(x = pressurehight)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Pressure High") +
+           theme_minimal()
+
+plot5 <- ggplot(imputed_training, aes(x = pressurelow)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Pressure Low") +
+           theme_minimal()
+
+plot6 <- ggplot(imputed_training, aes(x = glucose)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Glucose") +
+           theme_minimal()
+
+plot7 <- ggplot(imputed_training, aes(x = kcm)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("KCM") +
+           theme_minimal()
+
+plot8 <- ggplot(imputed_training, aes(x = troponin)) + 
+           geom_density(fill = fill_color, color = outline_color) +
+           ggtitle("Troponin") +
+           theme_minimal()
+
+# Arrange the plots in a 3x3 grid
+grid.arrange(plot1, plot2, plot3, plot4, plot5, plot6, plot7, plot8, nrow = 3)
+
+```
+
+- **age**: The distribution in the imputed_training set appears to be somewhat normal, indicating that the ages of individuals in the dataset are evenly distributed across different age groups.
+  
+- **impulse**: In the imputed_training set, the density is highest around a value of 70, suggesting that most individuals have impulses clustered around this value. However, there are also a few outliers in this feature, indicating some variability in the data.
+  
+- **pressurehight and pressurelow**: In the imputed_training set, the distributions seem to be approximately normal, with some outliers observed at higher values. This suggests that most individuals have blood pressure measurements within a certain range, but there are some extreme values present in the dataset.
+  
+- **glucose**: In the imputed_training set, the distribution is skewed to the right, with a higher density observed around lower values. This indicates that the majority of individuals have lower glucose levels, but there are also some individuals with higher glucose levels present in the dataset.
+  
+- **kcm and troponin**: In the imputed_training set, both features exhibit a right-skewed distribution with several outliers. This suggests that most individuals have kcm and troponin values concentrated towards lower values, but there are some individuals with significantly higher values present in the dataset. It might be beneficial to apply a transformation to these features to reduce the skewness and better understand their distributions.
+
+
+
+After having analyzed the distributions, we proceeded to examine the relationships between different pairs of numerical variables in the imputed_training set: 
+
+```{r correlation, echo=FALSE}
+# Create scatterplots
+plot1 <- ggplot(imputed_training, aes(x = impulse, y = pressurehight)) + geom_point()
+plot2 <- ggplot(imputed_training, aes(x = impulse, y = pressurelow)) + geom_point()
+plot3 <- ggplot(imputed_training, aes(x = impulse, y = glucose)) + geom_point()
+plot4 <- ggplot(imputed_training, aes(x = impulse, y = troponin)) + geom_point()
+plot5 <- ggplot(imputed_training, aes(x = impulse, y = kcm)) + geom_point()
+plot6 <- ggplot(imputed_training, aes(x = pressurehight, y = impulse)) + geom_point()
+plot7 <- ggplot(imputed_training, aes(x = pressurehight, y = pressurelow)) + geom_point()
+plot8 <- ggplot(imputed_training, aes(x = pressurehight, y = glucose)) + geom_point()
+plot9 <- ggplot(imputed_training, aes(x = pressurehight, y = kcm)) + geom_point()
+plot10 <- ggplot(imputed_training, aes(x = pressurehight, y = troponin)) + geom_point()
+plot11 <- ggplot(imputed_training, aes(x = pressurelow, y = impulse)) + geom_point()
+plot12 <- ggplot(imputed_training, aes(x = pressurelow, y = pressurehight)) + geom_point()
+plot13 <- ggplot(imputed_training, aes(x = pressurelow, y = glucose)) + geom_point()
+plot14 <- ggplot(imputed_training, aes(x = pressurelow, y = kcm)) + geom_point()
+plot15 <- ggplot(imputed_training, aes(x = pressurelow, y = troponin)) + geom_point()
+plot16 <- ggplot(imputed_training, aes(x = glucose, y = impulse)) + geom_point()
+plot17 <- ggplot(imputed_training, aes(x = glucose, y = pressurehight)) + geom_point()
+plot18 <- ggplot(imputed_training, aes(x = glucose, y = pressurelow)) + geom_point()
+plot19 <- ggplot(imputed_training, aes(x = glucose, y = kcm)) + geom_point()
+plot20 <- ggplot(imputed_training, aes(x = glucose, y = troponin)) + geom_point()
+plot21 <- ggplot(imputed_training, aes(x = kcm, y = impulse)) + geom_point()
+plot22 <- ggplot(imputed_training, aes(x = kcm, y = pressurehight)) + geom_point()
+plot23 <- ggplot(imputed_training, aes(x = kcm, y = pressurelow)) + geom_point()
+plot24 <- ggplot(imputed_training, aes(x = kcm, y = glucose)) + geom_point()
+plot25 <- ggplot(imputed_training, aes(x = kcm, y = troponin)) + geom_point()
+plot26 <- ggplot(imputed_training, aes(x = troponin, y = impulse)) + geom_point()
+plot27 <- ggplot(imputed_training, aes(x = troponin, y = pressurehight)) + geom_point()
+plot28 <- ggplot(imputed_training, aes(x = troponin, y = pressurelow)) + geom_point()
+plot29 <- ggplot(imputed_training, aes(x = troponin, y = glucose)) + geom_point()
+plot30 <- ggplot(imputed_training, aes(x = troponin, y = kcm)) + geom_point()
+
+# Arrange plots in a grid
+combined_plots <- plot1 + plot2 + plot3 + plot4 + plot5 + plot6 +
+                  plot7 + plot8 + plot9 + plot10 + plot11 + plot12 +
+                  plot13 + plot14 + plot15 + plot16 + plot17 + plot18 +
+                  plot19 + plot20 + plot21 + plot22 + plot23 + plot24 +
+                  plot25 + plot26 + plot27 + plot28 + plot29 + plot30
+
+# Display the grid
+combined_plots
+
+```
+
+From these plots, outliers are apparent for certain variables. Specifically, for "impulse," values exceeding 1000 appear to be outliers, while for "kcm," values above 200 and for "troponin," values surpassing 8 also appear to be outliers. These extreme values are likely to be noise and  they can potentially distort our analysis. Therefore, we will remove these outliers from both the imputed_train and imputed_test to ensure the  reliability of our future analyses.
+
+## Correlation Matrix
+
+```{r , echo=FALSE, warning=FALSE}
+
+# Calculate the correlation matrix
+corr_matrix <- cor(imputed_training[, -which(names(imputed_training) %in% c("HeartAttack"))])
+
+# Melt the correlation matrix
+corr_matrix_melted <- melt(corr_matrix)
+
+# Plot the heatmap
+ggplot(corr_matrix_melted, aes(Var2, Var1, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_viridis() +
+  theme_minimal() +
+  labs(title = "Correlation Matrix",
+       x = "Variables",
+       y = "Variables",
+       fill = "Correlation") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        plot.title = element_text(hjust = 0.5)) +
+  geom_text(aes(label = round(value, 2)), color = "black") +
+  coord_fixed()
+
+
+```
+
+After analyzing the distributions and identifying outliers, the next step involves examining the correlation matrix of the numerical variables. This correlation heatmap provides insights into the relationships between the features in the imputed_training set. By detecting multicollinearity among variables, we can assess how strongly predictors are correlated with each other. In our analysis, we observe that there are no high correlations between most variables, indicating low multicollinearity. However, we can mention a notable correlation between the variables "pressurehigh" and "pressurelow," suggesting a stronger relationship between these two variables compared to others, which actually makes sense.
+
+## Outliers
+
+We remove the outliers mentioned earlier: 
+
+```{r outliers }
+# Condition to filter out outliers
+condition <- imputed_training$impulse < 1000 & imputed_training$kcm <= 200 & imputed_training$troponin <= 8
+
+# Filter the data using the condition
+imputed_training2 <- imputed_training[condition, ]
+
+# Condition to filter out outliers
+condition <- imputed_testing$impulse < 1000 & imputed_testing$kcm <= 200 & imputed_testing$troponin <= 8
+
+# Filter the data using the condition
+imputed_testing2 <- imputed_testing[condition, ]
+
+
+```
+
+
+
+## Transformations
+
+After exploring various transformation methods to address positive skewness in the "troponin," "glucose," and "kcm" variables, we only end up applying a log transformation with a base of 2 to the "kcm" variable. This transformation helps to correct for skewness in someway and achieve a more symmetrical distribution. We chose not to apply transformations to the other variables because there were not improvements due to their distribution characteristics: 
+
+```{r transformations}
+
+# Apply log transformation with base 2 to specific columns
+imputed_training2[, c( "kcm")] <- log2(imputed_training2[, c( "kcm")] + 2)
+
+#Apply log transformation to specific columns
+#imputed_training2[, c("troponin")] <- log(imputed_training2[, c("troponin")])
+
+# Apply 1/x transformation to specific columns
+#imputed_training[, c("troponin")] <- 1 / imputed_training[, c( "troponin")]
+
+# Apply transformations to specific variables
+#imputed_training$age <- imputed_training$age^2
+
+# Center variables
+#imputed_training$impulse <- imputed_training$impulse - mean(imputed_training$impulse, na.rm = TRUE)
+#imputed_training$glucose <- imputed_training$glucose - mean(imputed_training$glucose, na.rm = TRUE)
+
+# Standardize the pressurelow variable
+#imputed_training$pressurelow<- scale(imputed_training$pressurelow)
+
+```
+
+
+A final plot illustrating the distributions by class after applying transformations and removing outliers is presented below. Each density plot represents a different variable, colored by the class variable "HeartAttack" to visualize the distribution for both positive and negative cases :
+
+```{r distribution_byclass, echo=FALSE}
+# Define color
+my_color <- "skyblue"
+
+# Plot the distributions
+plot1 <- ggplot(imputed_training2, aes(x = age)) + 
+           geom_density(aes(color = HeartAttack), fill = my_color, alpha = 0.1) +
+           ggtitle("Age") +
+           theme_minimal()
+
+plot2 <- ggplot(imputed_training2, aes(x = gender)) + 
+           geom_density(aes(color = HeartAttack), fill = my_color, alpha = 0.1) +
+           ggtitle("Gender") +
+           theme_minimal()
+
+plot3 <- ggplot(imputed_training2, aes(x = impulse)) + 
+           geom_density(aes(color = HeartAttack), fill = my_color, alpha = 0.1) +
+           ggtitle("Impulse") +
+           theme_minimal()
+
+plot4 <- ggplot(imputed_training2, aes(x = pressurehight)) + 
+           geom_density(aes(color = HeartAttack), fill = my_color, alpha = 0.1) +
+           ggtitle("Pressure High") +
+           theme_minimal()
+
+plot5 <- ggplot(imputed_training2, aes(x = pressurelow)) + 
+           geom_density(aes(color = HeartAttack), fill = my_color, alpha = 0.1) +
+           ggtitle("Pressure Low") +
+           theme_minimal()
+
+plot6 <- ggplot(imputed_training2, aes(x = glucose)) + 
+           geom_density(aes(color = HeartAttack), fill = my_color, alpha = 0.1) +
+           ggtitle("Glucose") +
+           theme_minimal()
+
+plot7 <- ggplot(imputed_training2, aes(x = kcm)) + 
+           geom_density(aes(color = HeartAttack), fill = my_color, alpha = 0.1) +
+           ggtitle("KCM") +
+           theme_minimal()
+
+plot8 <- ggplot(imputed_training2, aes(x = troponin)) + 
+           geom_density(aes(color = HeartAttack), fill = my_color, alpha = 0.1) +
+           ggtitle("Troponin") +
+           theme_minimal()
+
+# Arrange the plots in a grid
+grid.arrange(plot1, plot2, plot3, plot4, plot5, plot6, plot7, plot8, nrow = 3)
+
+```
+
+This visualization allows us to observe how the distributions of these variables differ between individuals with and without heart disease, we can see that for most of the variables distribution among classes is pretty similar, only differing in "kcm" and "troponin" variables, where in both cases there is a higher densisty for negative HeartAttacks
+
+
+## Encoding
+
+To prepare the data for modeling we perform encoding in the categorical variables. Therfore we encode in both the imputed_training2 and the imputed_testing2, the variable "HeartAttack" to a factor with levels "Negative" and "Positive" and the variable "gender" to a factor  with levels "Female" and "Male".
+```{r  encoding}
+# Convert 'HeartAttack' to a factor variable with levels 'Negative' and 'Positive' in the imputed training set
+imputed_training2$HeartAttack <- as.factor(imputed_training2$HeartAttack)
+levels(imputed_training2$HeartAttack) <- c("Negative", "Positive")
+
+# Convert 'gender' back into a categorical variable in the imputed training set
+imputed_training2$gender <- as.factor(imputed_training2$gender)
+levels(imputed_training2$gender) <- c("Female", "Male")
+
+# Convert 'HeartAttack' to a factor variable with levels 'Negative' and 'Positive' in the imputed testing set
+imputed_testing2$HeartAttack <- as.factor(imputed_testing2$HeartAttack)
+levels(imputed_testing2$HeartAttack) <- c("Negative", "Positive")
+
+# Convert 'gender' back into a categorical variable in the imputed testing set
+imputed_testing2$gender <- as.factor(imputed_testing2$gender)
+levels(imputed_testing2$gender) <- c("Female", "Male")
+
+```
+
+# Modeling
+
+We are employing the Caret package for all our models, utilizing its functionalities for evaluating performance and estimating model performance from a training set. Each model will be trained using 1 repeat of 5-fold cross-validation to ensure robustness and generalizability.
+
+## Bayes Classifiers
+
+### QDA with Caret
+
+```{r QDA}
+# Train the model using QDA
+ctrl <- trainControl(method = "repeatedcv", 
+                     repeats = 1,
+                     number = 5, classProbs = TRUE)
+
+qdaFit <- train(HeartAttack ~ ., 
+                method = "qda", 
+                data = imputed_training2,
+                preProcess = c("center", "scale"),
+                metric = "Accuracy",
+                trControl = ctrl)
+```
+
+#### Prediction and performance of QDA
+
+```{r PredQDA_Caret}
+# Make predictions on the testing dataset
+qdaPred <- predict(qdaFit, imputed_testing2)
+
+# Evaluate model performance using confusion matrix
+confusionMatrix(qdaPred, imputed_testing2$HeartAttack)
+
+```
+
+The results show that the QDA model achieved an accuracy of 85.3% on the imputed_testing2 dataset. Specifically, it correctly classified 155 instances as negative for heart attack and 291 instances as positive. Additionally, it misclassified 47 negative instances as positive and 8 positive instances as negative. 
+
+### LDA with Caret
+
+```{r LDA}
+# Train the model using penalized LDA
+ctrl <- trainControl(method = "repeatedcv", 
+                     repeats = 1,
+                     number = 5, classProbs = TRUE)
+
+ldaFit <- train(HeartAttack ~ ., 
+                method = "lda", 
+                data = imputed_training2,
+                preProcess = c("center", "scale"),
+                metric = "Accuracy",
+                tuneLength = 10,
+                trControl = ctrl)
+
+```
+
+#### Prediction and performance LDA
+
+```{r PredLDA_Caret}
+# Make predictions on the testing dataset
+ldaPred <- predict(ldaFit, imputed_testing2)
+
+# Evaluate model performance using confusion matrix
+confusionMatrix(ldaPred, imputed_testing2$HeartAttack)
+```
+
+The results show that the LDA model achieved an accuracy of 69.86 % on the imputed_testing2 dataset. Specifically, it correctly classified 113 instances as negative for heart attack and 237 instances as positive. Additionally, it misclassified 89 negative instances as positive and 62 positive instances as negative. 
+
+### Naive Bayes with Caret
+
+```{r NB}
+# Define the train control for repeated 10-fold cross-validation
+ctrl <- trainControl(method = "repeatedcv", 
+                     repeats = 1,
+                     number = 5,classProbs = TRUE,
+                     verbose = FALSE)
+
+# Define the tuning grid for the Naive Bayes model
+nb_grid <-   expand.grid(usekernel = c(TRUE, FALSE),
+                         laplace = c(0, 0.25, 0,5, 0.75, 1), 
+                         adjust =  c(0.5, 1, 1.5))
+
+# Train the Naive Bayes model
+nb_mod <- train(x = imputed_training2[, -which(names(imputed_training2) %in% c("HeartAttack"))],
+                y = imputed_training2$HeartAttack,
+                method = "naive_bayes",
+                trControl = ctrl,
+                tuneGrid = nb_grid)
+```
+
+In the Naive Bayes model, a tuning grid was defined to explore different combinations of parameters. The grid included options for using kernel estimation, Laplace smoothing, and adjusting probabilities. The model was then trained using this tuning grid with the specified parameters. 
+
+
+#### Prediction and performance NB
+
+```{r PredNB_Caret}
+# Make predictions using the trained Naive Bayes model
+nb_pred <- predict(nb_mod, newdata = imputed_testing2[, -which(names(imputed_testing2) %in% c("HeartAttack"))])
+
+# Generate confusion matrix for evaluation
+confusionMatrix(nb_pred, imputed_testing2$HeartAttack)
+
+```
+
+Upon evaluation, it achieved an accuracy of 81.44% on the imputed_testing2 dataset. Specifically, it correctly classified 160 instances as negative for heart attack and 248 instances as positive. Conversely, it misclassified 42 negative instances as positive and 51 positive instances as negative. 
+
+
+## Logistic Regression
+
+### Logistic Regression With Caret Tuned Grid
+
+```{r Lr, warning=FALSE}
+
+ctrl <- trainControl(method = "repeatedcv", 
+                     repeats = 1,
+                     number = 5, classProbs = TRUE)
+
+# LR
+lrfit <- train(HeartAttack ~ ., 
+               method = "glmnet",
+               family = "binomial",
+               data = imputed_training2,
+               metric = "Accuracy",
+               preProcess = c("center","scale"),
+               tuneGrid = expand.grid(alpha = seq(0, 1, 0.1), 
+                                      lambda = seq(0, .1, 0.01)),
+               trControl = ctrl)
+
+
+```
+
+In the Logistic Regression model, the Caret package was utilized with a tuned grid to explore different combinations of parameters. The tuning grid includes options for alpha and lambda values to be used in the model. The Logistic Regression model was then trained using this tuned grid.
+
+#### Prediction and performance LR
+
+```{r PredLr_caret}
+lrpred <- predict(lrfit, imputed_testing2)
+confusionMatrix(lrpred, imputed_testing2$HeartAttack)
+
+```
+
+The results from the Logistic Regression model achieved an accuracy of 86.43% on the imputed_testing2 dataset. Specifically, it correctly classified 142 instances as negative for heart attack and 291 instances as positive. However, it misclassified 8 negative instances as positive and 60 positive instances as negative. 
+
+
+# ROC 
+
+The ROC curve and AUC (Area Under the Curve) analysis were performed to evaluate additonally the performance of the models on the imputed_testing2 dataset. AUC values were calculated for each model, providing insights into the models' ability to discriminate between positive and negative instances.
+
+```{r AUC,message=FALSE}
+# Predict probabilities for the testing dataset
+qdaPred_prob <- predict(qdaFit, imputed_testing2, type = "prob")
+# Create ROC curve
+roc.qda <- roc(imputed_testing2$HeartAttack, qdaPred_prob[, "Positive"])
+# Calculate AUC
+auc.qda <- auc(roc.qda)
+
+# Predict probabilities for the testing dataset
+ldaPred_prob <- predict(ldaFit, imputed_testing2, type = "prob")
+# Create ROC curve
+roc.lda <- roc(imputed_testing2$HeartAttack, ldaPred_prob[, "Positive"])
+# Calculate AUC
+auc.lda <- auc(roc.lda)
+
+# Predict probabilities for the testing dataset
+nb_pred_prob <- predict(nb_mod, newdata = imputed_testing2[, -which(names(imputed_testing2) %in% c("HeartAttack"))], type = "prob")
+# Create ROC curve
+roc.nb <- roc(imputed_testing2$HeartAttack, nb_pred_prob[, "Positive"])
+# Calculate AUC
+auc.nb <- auc(roc.nb)
+
+# Predict probabilities for the testing dataset
+lrpred_prob <- predict(lrfit, imputed_testing2, type = "prob")
+# Create ROC curve
+roc.lr <- roc(imputed_testing2$HeartAttack, lrpred_prob[, "Positive"])
+# Calculate AUC
+auc.lr <- auc(roc.lr)
+
+```
+
+```{r table, echo=FALSE}
+# Load required packages
+library(knitr)
+
+# Create a data frame with the results
+results <- data.frame(
+  Model = c("QDA", "LDA", "Naive Bayes", "Logistic Regression"),
+  AUC = c(auc.qda, auc.lda, auc.nb, auc.lr)
+)
+
+# Print the results in a table format
+kable(results, align = "c", caption = "AUC values for different models on testing dataset")
+
+```
+
+These AUC values indicate the discriminatory power of each model in distinguishing between positive and negative instances of heart attack outcomes. Higher AUC values suggest better performance in terms of model discrimination. In this case, both QDA and Logistic Regression models demonstrate higher AUC values, indicating stronger discriminatory ability compared to LDA and Naive Bayes models.
+
+```{r ROC }
+# Create an empty plot with the first ROC curve
+plot(roc.lda, col = "green", print.thres = TRUE)
+
+# Add the other ROC curves to the same plot
+plot(roc.qda, col = "blue", print.thres = TRUE, add = TRUE)
+plot(roc.lr, col = "red", print.thres = TRUE, add = TRUE)
+plot(roc.nb, col = "purple", print.thres = TRUE, add = TRUE)
+
+# legend
+legend("bottomright", legend = c("LDA", "QDA", "Logistic Regression", "Naive Bayes"), col = c("green", "blue", "red", "purple"), lty = 1, cex = 0.8)
+
+```
+
+To continue with the analysis we will pick the Logistic Regression model as the best model for our dataset.
+
+# Incorporing economic impact
+
+In the context of predicting heart attacks, false negatives occur when the model predicts that a patient will not have a heart attack but they actually do, leading to a failure to identify individuals at risk. Adjusting the probability threshold aims to increase sensitivity, reducing false negatives by accepting more false positives to catch more true positives. In economic terms, true positives (accurate heart attack prediction) may yield a 15% profit due to potentially saving lives, while false positives (incorrect predictions) lead to a 3% loss due to unnecessary costs. True negatives (correctly predicting no heart attack) avoid unnecessary costs with 0% profit, and false negatives (missed predictions) may result in a loss of 100% due to missed treatment opportunities and potential loss of life, hence what we will try is to reduce the false negatives, which the important error in this context.
+
+| Prediction/Reference | Actual Negative (No Heart Attack) | Actual Positive (Heart Attack) |
+|----------------------|------------------------------------|---------------------------------|
+| Predicted Negative  | TN: 0                             | FN: -1                       |
+| Predicted Positive  | FP: -0.03                          | TP: 0.15  
+
+
+```{r profit}
+#profit table as a vector
+profit.unit <- c(0, -0.03, -1.0, .15)
+
+```
+
+
+## Selecting the optimal threshold 
+
+```{r loop, warning=FALSE}
+profit.i = matrix(NA, nrow = 50, ncol = 10)
+
+# THIS IS TO BE MORE CONSERVATIVE
+p0=0.5  
+p1=1-p0
+
+j <- 0
+for (threshold in seq(0.05,0.5,0.05)){
+  
+  j <- j + 1
+  cat(j)
+  for(i in 1:50){
+    
+    # partition imputed_training2 intro training (60%) and testing sets (40%)
+    d <- createDataPartition(imputed_training2$HeartAttack, p = 0.6, list = FALSE)
+    # select training sample
+    train<-imputed_training2[d,]
+    test <-imputed_training2[-d,]  
+    
+    # Logistic Regression Model
+    logit.model <- glm(HeartAttack~.,family = binomial(link = "logit"),          data = train)
+    
+    # posterior probabilities
+    probability <- predict(logit.model, newdata=test, type='response')
+
+    # Predictions with a given threshold
+    Cred.pred = rep("Negative", nrow(test)) 
+    Cred.pred[which(probability > threshold)] = "Positive"  
+
+    CM = confusionMatrix(factor(Cred.pred), test$HeartAttack)$table
+
+    profit.perperson <- sum(profit.unit*CM)/sum(CM)
+    profit.i[i,j] <- profit.perperson
+    
+  }
+}
+
+```
+
+This code snippet optimizes the threshold for logistic regression classification. It iterates over different threshold values, splitting the imputed_training2 dataset into training and testing sets for each iteration. Logistic regression models are trained on the training data, and posterior probabilities are calculated for the testing data. Predictions are made based on these probabilities, and profitability is evaluated using the table profit values. The goal is to find the threshold that maximizes profitability, enhancing the model's accuracy in identifying heart attack risk.
+
+## Summary of economic value of predictions
+
+```{r economic_value, echo=FALSE}
+boxplot(profit.i, main = "Hyper-parameter selection",
+        ylab = "unit profit",
+        xlab = "threshold",names = seq(0.05,0.5,0.05),col="royalblue2")
+
+```
+
+This plot displays the unit profit obtained from different threshold values used in logistic regression classification. The x-axis represents the threshold values, while the y-axis represents the unit profit. The plot provides insights into how changes in the threshold affect the profitability of the model, here threshold values around 0.05 are the optimal, we can check the exact unit profit for a 0.05 treshold with the following code:
+
+```{r treshold_optimal}
+apply(profit.i, 2, median) 
+```
+
+## Final prediction using the optimal hyper-parameter:
+
+```{r final_prediction, warning=FALSE}
+logit.model <- glm(HeartAttack~.,family = binomial(link = "logit"),          data = imputed_training2)
+probability <- predict(logit.model, newdata=imputed_testing2, type='response')    
+threshold = 0.05
+Cred.pred = rep("Negative", nrow(imputed_testing2))
+Cred.pred[which(probability > threshold)] = "Positive"
+CM = confusionMatrix(factor(Cred.pred), imputed_testing2$HeartAttack)$table
+CM
+profit.perperson <- sum(profit.unit*CM)/sum(CM)
+profit.perperson
+```
+
+
+It is estimated that 7% of Americans aged 20 and older have coronary heart disease (CHD). This prevalence translates to approximately 70,000 cases per 1,000,000 people, then the expected profit is: 
+
+```{r totalprofit}
+profit.perperson*0.07*1000000
+```
+
+The expected profit would be approximately 5369.46 dollars.
+
+In the final prediction for the testing set using the optimal hyper-parameter threshold of 0.05, the logistic regression model correctly classified 103 instances as negative for heart attack and 296 instances as positive, with 3 false negative predictions and 99 false positive predictions. 
+
+The calculated profit per person from this prediction is approximately 0.077. In terms of economic impact, preventing premature deaths from heart attacks can lead to significant gains in productivity and workforce participation, contributing to the gross domestic product. 
+
+While the exact value of saving a life from a heart attack is challenging to quantify, studies estimate substantial financial benefits, with potential gains extending beyond healthcare savings to broader societal aspects like productivity and well-being. For example, preventing coronary heart disease for 10 years could save approximately USD 15 billion dollars in gross domestic product (https://www.escardio.org/The-ESC/Press-Office/Press-releases/Preventing-heart-disease-could-keep-more-people-employed-and-save-billions-for-the-economy) 
+
+# Conclusion
+
+Out of the 4 models we have trained, the logistic regression model resulted the best that adjusts to our data, we used it with a tweak in its settings (we set the threshold at 0.05) and turned out to be pretty good at predicting heart attacks. It's like making a smart guess and getting it right most of the time. We figured out that for each person, the estimated profit was around 0.077, which is not bad at all.
+
+Even though putting an exact money value on preventing heart attacks is tricky, studies show that it can bring in a lot of money by keeping people healthy and working. By using these cool prediction tools and adjusting how we make decisions, we can do a better job at spotting who might be at risk of a heart attack. This could not only save lives but also have some really good effects on society and the economy.
+
+By looking into these prediction methods more and applying them wisely, we might see some real improvements in healthcare and how we manage resources to fight heart diseases.
